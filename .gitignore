@@ -1,15 +1,13 @@
-# dependencies
 node_modules/
-
-# build output
-dist/
-*.tsbuildinfo
-
-# env & secrets
+.next/
+out/
 .env
-.env.*
-!.env.example
+.env.local
+*.tsbuildinfo
+next-env.d.ts
 
-# os
-.DS_Store
-Thumbs.db
+# stray local clone of the GitHub repo — not part of the project
+rewind/
+
+# local Claude Code permissions
+.claude/settings.local.json

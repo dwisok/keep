@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>REWIND — Token Replay</title>
+<style>
+  :root {
+    --bg: #070B14;
+    --panel: #0D1322;
+    --line: #1B2438;
+    --ink: #E8ECF4;
+    --dim: #5E6B85;
+    --buy: #39D4C0;
+    --sell: #FF6B5E;
+    --pool: #8B7CF6;
+    --dep: #F5B95A;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--mono);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ---------- Header ---------- */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--line);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .brand h1 { font-size: 15px; letter-spacing: 0.22em; font-weight: 700; }
+  .brand .tag { font-size: 10px; color: var(--dim); letter-spacing: 0.08em; display: block; margin-top: 2px; }
+  .ca-box {
+    flex: 1;
+    display: flex;
+    gap: 8px;
+    min-width: 260px;
+  }
+  .ca-box input {
+    flex: 1;
+    font-family: var(--mono);
+    font-size: 12px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    color: var(--ink);
+    padding: 9px 12px;
+    letter-spacing: 0.02em;
+  }
+  .ca-box input:focus { outline: none; border-color: var(--dim); }
+  .ca-box input::placeholder { color: var(--dim); }
+  button {
+    font-family: var(--mono);
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 8px 14px;
+    font-size: 12px;
+    cursor: pointer;
+    letter-spacing: 0.08em;
+    transition: border-color 0.15s, background 0.15s;
+    white-space: nowrap;
+  }
+  button:hover { border-color: var(--dim); }
+  button:focus-visible { outline: 2px solid var(--buy); outline-offset: 2px; }
+  button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); font-weight: 700; }
+  .timecode { font-size: 18px; font-variant-numeric: tabular-nums; letter-spacing: 0.06em; }
+  .timecode span { color: var(--dim); font-size: 10px; margin-right: 6px; letter-spacing: 0.15em; }
+
+  /* ---------- Token strip ---------- */
+  #token-strip {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--line);
+    font-size: 11px;
+    color: var(--dim);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    letter-spacing: 0.05em;
+  }
+  #token-strip b { color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 600; }
+  #token-strip .sym { color: var(--pool); font-weight: 700; font-size: 12px; }
+  #token-strip .up { color: var(--buy); }
+  #token-strip .down { color: var(--sell); }
+
+  /* ---------- Stage ---------- */
+  #stage-wrap { flex: 1; position: relative; min-height: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  #caption {
+    position: absolute;
+    left: 50%; bottom: 22px;
+    transform: translateX(-50%);
+    max-width: 84%;
+    text-align: center;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 8px 16px;
+    background: rgba(7, 11, 20, 0.85);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    opacity: 0;
+    transition: opacity 0.25s;
+    pointer-events: none;
+  }
+  #caption.show { opacity: 1; }
+  #caption .buy  { color: var(--buy); font-weight: 700; }
+  #caption .sell { color: var(--sell); font-weight: 700; }
+  #caption .xfer { color: var(--dep); font-weight: 700; }
+
+  #legend {
+    position: absolute; top: 12px; right: 16px;
+    font-size: 10px; color: var(--dim);
+    display: flex; flex-direction: column; gap: 5px;
+    text-align: right; letter-spacing: 0.06em;
+  }
+  #legend .row { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+  #legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+  /* ---------- Controls ---------- */
+  #controls {
+    flex-shrink: 0;
+    border-top: 1px solid var(--line);
+    background: var(--panel);
+    padding: 12px 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  #timeline { position: relative; height: 34px; cursor: pointer; user-select: none; touch-action: none; }
+  #timeline .track { position: absolute; left: 0; right: 0; top: 15px; height: 4px; border-radius: 2px; background: var(--line); }
+  #timeline .fill { position: absolute; left: 0; top: 15px; height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--buy), var(--pool)); width: 0%; }
+  #timeline .tick { position: absolute; top: 9px; width: 2px; height: 16px; border-radius: 1px; opacity: 0.85; }
+  #timeline .head { position: absolute; top: 5px; width: 2px; height: 24px; background: var(--ink); box-shadow: 0 0 8px rgba(232,236,244,0.6); }
+  .bar { display: flex; align-items: center; gap: 14px; font-size: 11px; flex-wrap: wrap; }
+  button.play { min-width: 92px; }
+  .speeds { display: flex; gap: 4px; }
+  .speeds button { padding: 6px 10px; color: var(--dim); }
+  .speeds button.on { color: var(--ink); border-color: var(--dim); background: rgba(255,255,255,0.04); }
+  .spacer { flex: 1; }
+  .stat { color: var(--dim); letter-spacing: 0.06em; }
+  .stat b { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  @media (max-width: 640px) {
+    .brand .tag { display: none; }
+    .timecode { font-size: 14px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #caption { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <h1>REWIND</h1>
+    <span class="tag">token replay · solana</span>
+  </div>
+  <div class="ca-box">
+    <input id="ca-input" spellcheck="false" placeholder="colle un contract address (mint)…"
+           value="7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr">
+    <button class="primary" id="btn-load">CHARGER</button>
+  </div>
+  <div class="timecode"><span>T+</span><b id="tc">00:00:00</b></div>
+</header>
+
+<div id="token-strip">
+  <span class="sym" id="ts-sym">$—</span>
+  <span>mcap <b id="ts-mcap">—</b></span>
+  <span>prix <b id="ts-price">—</b> <span id="ts-chg"></span></span>
+  <span>volume <b id="ts-vol">$0</b></span>
+  <span>achats <b id="ts-buys" style="color:var(--buy)">0</b></span>
+  <span>ventes <b id="ts-sells" style="color:var(--sell)">0</b></span>
+  <span>holders <b id="ts-holders">0</b></span>
+</div>
+
+<div id="stage-wrap">
+  <canvas id="stage"></canvas>
+  <div id="caption"></div>
+  <div id="legend">
+    <div class="row"><span>achat</span><i style="background:var(--buy)"></i></div>
+    <div class="row"><span>vente</span><i style="background:var(--sell)"></i></div>
+    <div class="row"><span>transfert</span><i style="background:var(--dep)"></i></div>
+    <div class="row"><span>pool LP</span><i style="background:var(--pool)"></i></div>
+  </div>
+</div>
+
+<div id="controls">
+  <div id="timeline" aria-label="Timeline du replay">
+    <div class="track"></div>
+    <div class="fill" id="tl-fill"></div>
+    <div class="head" id="tl-head" style="left:0%"></div>
+  </div>
+  <div class="bar">
+    <button class="primary play" id="btn-play">► PLAY</button>
+    <button id="btn-restart">⟲</button>
+    <div class="speeds" id="speeds">
+      <button data-s="30">1×</button>
+      <button data-s="60" class="on">2×</button>
+      <button data-s="120">4×</button>
+      <button data-s="240">8×</button>
+    </div>
+    <div class="spacer"></div>
+    <span class="stat">événement <b id="st-tx">0</b>/<span id="st-total">0</span></span>
+  </div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+/* =========================================================
+   DATA LAYER
+   En preview les appels réseau sont bloqués : le CA sert de
+   seed à un générateur de scénario réaliste. Pour la prod,
+   remplacer generateScenario() par fetchScenario(mint) :
+   Birdeye /defi/txs/token (buys/sells) + Helius parsed
+   transfers, normalisés vers le même format d'événements.
+   ========================================================= */
+
+const WINDOW = 7200;      // fenêtre 2h
+const ANIM = 90;          // durée sim d'un flux
+const CAPTION_HOLD = 240;
+const SUPPLY = 1000;      // en millions de tokens
+
+/* ---- PRNG seedé par le CA ---- */
+function hashStr(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function mulberry32(a) {
+  return () => {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function fakeAddr(rng) {
+  let a = '';
+  for (let i = 0; i < 4; i++) a += B58[Math.floor(rng() * B58.length)];
+  let z = '';
+  for (let i = 0; i < 4; i++) z += B58[Math.floor(rng() * B58.length)];
+  return a + '…' + z;
+}
+function symbolFrom(ca, rng) {
+  const letters = ca.replace(/[^A-Za-z]/g, '').toUpperCase() || 'TOKEN';
+  const len = 3 + Math.floor(rng() * 2);
+  let s = '';
+  for (let i = 0; i < len; i++) s += letters[Math.floor(rng() * letters.length)];
+  return s;
+}
+
+/* ---- Générateur de scénario ---- */
+function generateScenario(ca) {
+  const rng = mulberry32(hashStr(ca || 'default'));
+  const sym = symbolFrom(ca, rng);
+
+  const wallets = [
+    { id: 'pool', label: 'Raydium LP', type: 'pool' },
+    { id: 'dep',  label: 'deployer',   type: 'dep' },
+  ];
+  const holdings = { pool: SUPPLY * 0.78, dep: SUPPLY * 0.22 };
+
+  const nFresh = 2 + Math.floor(rng() * 2);          // 2-3 fresh wallets (bundle)
+  const fresh = [];
+  for (let i = 0; i < nFresh; i++) {
+    const id = 'f' + i;
+    fresh.push(id);
+    wallets.push({ id, label: fakeAddr(rng), type: 'fresh' });
+    holdings[id] = 0;
+  }
+  const nBuyers = 4 + Math.floor(rng() * 3);         // 4-6 acheteurs organiques
+  const buyers = [];
+  for (let i = 0; i < nBuyers; i++) {
+    const id = 'w' + i;
+    buyers.push(id);
+    wallets.push({ id, label: fakeAddr(rng), type: 'wallet' });
+    holdings[id] = 0;
+  }
+  const whale = 'whale';
+  wallets.push({ id: whale, label: fakeAddr(rng) + ' 🐋'.replace(' 🐋',''), type: 'whale' });
+  holdings[whale] = 0;
+
+  const liq = 15000 + rng() * 20000;                 // liquidité usd approx
+  let priceM = liq / (SUPPLY * 0.78) * (0.8 + rng() * 0.6);  // $ par million de tokens
+  const price0 = priceM;
+
+  const evs = [];
+  const push = e => evs.push(e);
+
+  const impact = (usd, dir) => { priceM *= Math.max(0.4, 1 + dir * (usd / liq) * (0.35 + rng() * 0.3)); };
+
+  function buy(t, who, usd) {
+    const tokens = Math.min(usd / priceM, holdings.pool * 0.4);
+    impact(usd, +1);
+    holdings.pool -= tokens; holdings[who] += tokens;
+    push({ t, type: 'buy', from: 'pool', to: who, tokens, usd, priceAfter: priceM });
+  }
+  function sell(t, who, frac) {
+    const tokens = holdings[who] * frac;
+    if (tokens <= 0.01) return;
+    const usd = tokens * priceM;
+    impact(usd, -1);
+    holdings[who] -= tokens; holdings.pool += tokens;
+    push({ t, type: 'sell', from: who, to: 'pool', tokens, usd, priceAfter: priceM });
+  }
+  function xfer(t, from, to, tokens) {
+    tokens = Math.min(tokens, holdings[from]);
+    holdings[from] -= tokens; holdings[to] += tokens;
+    push({ t, type: 'xfer', from, to, tokens, usd: tokens * priceM, priceAfter: priceM });
+  }
+
+  /* Acte 1 — le bundle : deployer distribue aux fresh wallets */
+  let t = 90 + rng() * 120;
+  for (const f of fresh) {
+    xfer(Math.round(t), 'dep', f, SUPPLY * (0.03 + rng() * 0.04));
+    t += 60 + rng() * 120;
+  }
+
+  /* Acte 2 — les achats organiques montent le prix */
+  const buyTimes = [];
+  for (let i = 0; i < nBuyers * 2; i++) buyTimes.push(400 + rng() * 3800);
+  buyTimes.sort((a, b) => a - b);
+  buyTimes.forEach((bt, i) => {
+    const who = buyers[i % nBuyers];
+    buy(Math.round(bt), who, 150 + rng() * 2200);
+  });
+
+  /* Acte 3 — la whale entre */
+  buy(Math.round(2200 + rng() * 1200), whale, 4000 + rng() * 5000);
+
+  /* Quelques prises de profit en route */
+  sell(Math.round(3000 + rng() * 1200), buyers[0], 0.4 + rng() * 0.3);
+  if (rng() > 0.4) sell(Math.round(3600 + rng() * 1000), buyers[1], 0.3 + rng() * 0.3);
+
+  /* Acte 4 — dump coordonné des fresh wallets */
+  let dt = 5100 + rng() * 400;
+  for (const f of fresh) {
+    sell(Math.round(dt), f, 0.85 + rng() * 0.15);
+    dt += 40 + rng() * 90;
+  }
+
+  /* Acte 5 — panique */
+  sell(Math.round(dt + 200 + rng() * 300), buyers[2 % nBuyers], 0.8);
+  if (rng() > 0.3) sell(Math.round(dt + 500 + rng() * 400), whale, 0.5 + rng() * 0.4);
+  sell(Math.round(Math.min(dt + 800 + rng() * 500, WINDOW - 120)), buyers[3 % nBuyers], 0.9);
+
+  evs.sort((a, b) => a.t - b.t);
+
+  /* balances initiales (avant tout événement) */
+  const init = { pool: SUPPLY * 0.78, dep: SUPPLY * 0.22 };
+  wallets.forEach(w => { if (!(w.id in init)) init[w.id] = 0; });
+
+  /* première apparition de chaque wallet */
+  const appear = { pool: 0, dep: 0 };
+  for (const e of evs) {
+    if (!(e.from in appear)) appear[e.from] = e.t;
+    if (!(e.to in appear)) appear[e.to] = e.t;
+  }
+  wallets.forEach(w => { if (!(w.id in appear)) appear[w.id] = 0; });
+
+  return { ca, sym, wallets, evs, init, appear, price0, liq };
+}
+
+/* ========================================================= */
+
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+const captionEl = document.getElementById('caption');
+const tcEl = document.getElementById('tc');
+const fillEl = document.getElementById('tl-fill');
+const headEl = document.getElementById('tl-head');
+const tlEl = document.getElementById('timeline');
+
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const COL = { buy: css('--buy'), sell: css('--sell'), pool: css('--pool'), dep: css('--dep'),
+              ink: css('--ink'), dim: css('--dim'), line: css('--line') };
+const MONO = css('--mono');
+
+const typeColor = t =>
+  t === 'pool' ? COL.pool :
+  t === 'dep' || t === 'fresh' ? COL.dep :
+  t === 'whale' ? COL.ink : COL.dim;
+
+let S = null;          // scénario courant
+let simT = 0, speed = 60, playing = false, lastRaf = 0, scrubbing = false;
+let lastCaption = -2;
+
+let W = 0, H = 0;
+const pos = {};
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const r = canvas.parentElement.getBoundingClientRect();
+  W = r.width; H = r.height;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  layout();
+}
+window.addEventListener('resize', resize);
+
+function layout() {
+  if (!S) return;
+  const cx = W / 2, cy = H / 2;
+  pos.pool = { x: cx, y: cy };
+  const others = S.wallets.filter(w => w.id !== 'pool');
+  const R = Math.min(W, H) * 0.37;
+  others.forEach((w, i) => {
+    const a = (i / others.length) * Math.PI * 2 - Math.PI / 2;
+    pos[w.id] = { x: cx + Math.cos(a) * R * 1.12, y: cy + Math.sin(a) * R * 0.88 };
+  });
+}
+
+const ease = u => u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+
+/* ---- Etat au temps T ---- */
+function stateAt(T) {
+  const b = Object.assign({}, S.init);
+  let done = 0, vol = 0, buys = 0, sells = 0, price = S.price0;
+  for (const e of S.evs) {
+    if (T <= e.t) continue;
+    const u = Math.min((T - e.t) / ANIM, 1);
+    const k = ease(u);
+    b[e.from] -= e.tokens * k;
+    b[e.to] += e.tokens * k;
+    if (e.type !== 'xfer') vol += e.usd * k;
+    price = price + (e.priceAfter - price) * k;   // suit le dernier événement
+    if (u >= 1) {
+      done++;
+      if (e.type === 'buy') buys++;
+      if (e.type === 'sell') sells++;
+      price = e.priceAfter;
+    }
+  }
+  return { b, done, vol, buys, sells, price };
+}
+
+const radius = tokens => Math.max(12, 10 + Math.sqrt(Math.max(tokens, 0)) * 2.1);
+
+/* ---- Flux ---- */
+function flowColor(e) { return e.type === 'buy' ? COL.buy : e.type === 'sell' ? COL.sell : COL.dep; }
+
+function drawFlow(e, T) {
+  const u = (T - e.t) / ANIM;
+  if (u < 0 || u > 1.15) return;
+  const a = pos[e.from], z = pos[e.to];
+  if (!a || !z) return;
+  const color = flowColor(e);
+
+  ctx.save();
+  ctx.globalAlpha = 0.25 * (u <= 1 ? 1 : 1 - (u - 1) / 0.15);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.setLineDash(e.type === 'xfer' ? [2, 4] : [4, 6]);
+  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(z.x, z.y); ctx.stroke();
+  ctx.restore();
+
+  if (u > 1) return;
+
+  const n = Math.min(3 + Math.round(e.usd / 800), 14);
+  ctx.save();
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 12;
+  ctx.fillStyle = color;
+  for (let i = 0; i < n; i++) {
+    let p = u - i * 0.045;
+    if (p < 0 || p > 1) continue;
+    p = ease(p);
+    ctx.beginPath();
+    ctx.arc(a.x + (z.x - a.x) * p, a.y + (z.y - a.y) * p, Math.max(3.4 - i * 0.18, 1.2), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const hp = ease(Math.min(u, 1));
+  const hx = a.x + (z.x - a.x) * hp, hy = a.y + (z.y - a.y) * hp;
+  const ang = Math.atan2(z.y - a.y, z.x - a.x);
+  ctx.beginPath();
+  ctx.moveTo(hx + Math.cos(ang) * 9, hy + Math.sin(ang) * 9);
+  ctx.lineTo(hx + Math.cos(ang + 2.5) * 7, hy + Math.sin(ang + 2.5) * 7);
+  ctx.lineTo(hx + Math.cos(ang - 2.5) * 7, hy + Math.sin(ang - 2.5) * 7);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.font = '700 11px ' + MONO;
+  ctx.fillStyle = color;
+  ctx.textAlign = 'center';
+  ctx.globalAlpha = Math.sin(Math.min(u, 1) * Math.PI);
+  const sign = e.type === 'sell' ? '−' : '+';
+  ctx.fillText(sign + '$' + Math.round(e.usd).toLocaleString('en-US'), (a.x + z.x) / 2, (a.y + z.y) / 2 - 12);
+  ctx.restore();
+}
+
+/* ---- Bulles ---- */
+function drawBubble(w, tokens, T, price) {
+  const born = S.appear[w.id];
+  if (T < born) return;
+  const fade = Math.min((T - born) / 60, 1);
+  const p = pos[w.id];
+  const r = radius(tokens) * (0.6 + 0.4 * fade);
+  const c = typeColor(w.type);
+
+  let pulse = 0;
+  for (const e of S.evs) {
+    if (e.from !== w.id && e.to !== w.id) continue;
+    const u = (T - e.t) / ANIM;
+    if (u >= 0 && u <= 1) pulse = Math.max(pulse, Math.sin(u * Math.PI));
+  }
+
+  ctx.save();
+  ctx.globalAlpha = fade;
+  if (pulse > 0) { ctx.shadowColor = c; ctx.shadowBlur = 22 * pulse; }
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+  ctx.fillStyle = w.id === 'pool' ? 'rgba(139,124,246,0.08)' : 'rgba(232,236,244,0.05)';
+  ctx.fill();
+  ctx.lineWidth = (w.id === 'pool' ? 2 : 1.2) + pulse;
+  ctx.strokeStyle = c;
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.save();
+  ctx.globalAlpha = fade;
+  ctx.textAlign = 'center';
+  ctx.font = (w.id === 'pool' ? '700 12px ' : '600 10px ') + MONO;
+  ctx.fillStyle = w.id === 'pool' ? COL.pool : COL.dim;
+  ctx.fillText(w.label, p.x, p.y - r - 9);
+  ctx.font = '700 11px ' + MONO;
+  ctx.fillStyle = COL.ink;
+  if (w.id === 'pool') {
+    ctx.fillText(fmtTokens(tokens) + ' $' + S.sym, p.x, p.y + 4);
+  } else if (tokens > 0.05) {
+    ctx.fillText('$' + Math.round(tokens * price).toLocaleString('en-US'), p.x, p.y + 4);
+  }
+  ctx.restore();
+}
+
+function fmtTokens(m) {
+  return m >= 1 ? Math.round(m) + 'M' : Math.round(m * 1000) + 'k';
+}
+function fmtMcap(price) {
+  const mc = price * SUPPLY;
+  return mc >= 1e6 ? '$' + (mc / 1e6).toFixed(2) + 'M' : '$' + (mc / 1e3).toFixed(1) + 'k';
+}
+function fmtPrice(priceM) {
+  const p = priceM / 1e6; // $ par token
+  return '$' + p.toPrecision(3);
+}
+
+/* ---- Grille ---- */
+function drawGrid() {
+  ctx.save();
+  ctx.strokeStyle = COL.line;
+  ctx.globalAlpha = 0.35;
+  ctx.lineWidth = 1;
+  const step = 48;
+  for (let x = (W % step) / 2; x < W; x += step) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for (let y = (H % step) / 2; y < H; y += step) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  ctx.restore();
+}
+
+/* ---- Sous-titres ---- */
+function captionFor(e) {
+  const who = S.wallets.find(w => w.id === (e.type === 'buy' ? e.to : e.from));
+  const usd = '$' + Math.round(e.usd).toLocaleString('en-US');
+  const tk = fmtTokens(e.tokens) + ' $' + S.sym;
+  if (e.type === 'buy') {
+    const tag = who.type === 'whale' ? 'whale ' : '';
+    return '<span class="buy">▲ ACHAT ' + usd + '</span> · ' + tag + who.label + ' récupère ' + tk;
+  }
+  if (e.type === 'sell') {
+    const tag = who.type === 'fresh' ? 'fresh wallet ' : who.type === 'whale' ? 'whale ' : '';
+    return '<span class="sell">▼ VENTE ' + usd + '</span> · ' + tag + who.label + ' dump ' + tk;
+  }
+  const to = S.wallets.find(w => w.id === e.to);
+  return '<span class="xfer">⇄ TRANSFERT</span> · deployer envoie ' + tk + ' à ' + to.label + ' (fresh wallet)';
+}
+
+function updateCaption(T) {
+  let idx = -1;
+  for (let i = 0; i < S.evs.length; i++) {
+    if (T >= S.evs[i].t && T <= S.evs[i].t + CAPTION_HOLD) idx = i;
+  }
+  if (idx === lastCaption) return;
+  lastCaption = idx;
+  if (idx === -1) { captionEl.classList.remove('show'); return; }
+  captionEl.innerHTML = captionFor(S.evs[idx]);
+  captionEl.classList.add('show');
+}
+
+/* ---- Timeline ---- */
+function buildTicks() {
+  tlEl.querySelectorAll('.tick').forEach(el => el.remove());
+  S.evs.forEach(e => {
+    const el = document.createElement('div');
+    el.className = 'tick';
+    el.style.left = (e.t / WINDOW * 100) + '%';
+    el.style.background = flowColor(e);
+    tlEl.appendChild(el);
+  });
+  document.getElementById('st-total').textContent = S.evs.length;
+}
+function scrubTo(x) {
+  const r = tlEl.getBoundingClientRect();
+  simT = Math.max(0, Math.min(1, (x - r.left) / r.width)) * WINDOW;
+  lastCaption = -2;
+}
+tlEl.addEventListener('pointerdown', e => { scrubbing = true; tlEl.setPointerCapture(e.pointerId); scrubTo(e.clientX); });
+tlEl.addEventListener('pointermove', e => { if (scrubbing) scrubTo(e.clientX); });
+tlEl.addEventListener('pointerup', () => scrubbing = false);
+
+/* ---- Playback ---- */
+const btnPlay = document.getElementById('btn-play');
+btnPlay.addEventListener('click', () => {
+  if (simT >= WINDOW) simT = 0;
+  playing = !playing;
+  btnPlay.textContent = playing ? '❚❚ PAUSE' : '► PLAY';
+});
+document.getElementById('btn-restart').addEventListener('click', () => { simT = 0; lastCaption = -2; });
+document.getElementById('speeds').addEventListener('click', e => {
+  const b = e.target.closest('button[data-s]');
+  if (!b) return;
+  speed = +b.dataset.s;
+  document.querySelectorAll('#speeds button').forEach(x => x.classList.toggle('on', x === b));
+});
+
+/* ---- Chargement d'un token ---- */
+function load(ca) {
+  S = generateScenario(ca.trim());
+  simT = 0; playing = false; lastCaption = -2;
+  btnPlay.textContent = '► PLAY';
+  document.getElementById('ts-sym').textContent = '$' + S.sym;
+  layout();
+  buildTicks();
+}
+document.getElementById('btn-load').addEventListener('click', () => load(document.getElementById('ca-input').value));
+document.getElementById('ca-input').addEventListener('keydown', e => { if (e.key === 'Enter') load(e.target.value); });
+
+const fmt = t => {
+  const s = Math.floor(t);
+  return String(Math.floor(s / 3600)).padStart(2, '0') + ':' +
+         String(Math.floor(s % 3600 / 60)).padStart(2, '0') + ':' +
+         String(s % 60).padStart(2, '0');
+};
+
+function frame(ts) {
+  const dt = Math.min((ts - lastRaf) / 1000, 0.1);
+  lastRaf = ts;
+  if (playing && !scrubbing) {
+    simT += dt * speed;
+    if (simT >= WINDOW) { simT = WINDOW; playing = false; btnPlay.textContent = '► REPLAY'; }
+  }
+
+  const st = stateAt(simT);
+
+  ctx.clearRect(0, 0, W, H);
+  drawGrid();
+  for (const e of S.evs) drawFlow(e, simT);
+  for (const w of S.wallets) drawBubble(w, st.b[w.id], simT, st.price);
+  updateCaption(simT);
+
+  tcEl.textContent = fmt(simT);
+  const pct = simT / WINDOW * 100;
+  fillEl.style.width = pct + '%';
+  headEl.style.left = pct + '%';
+  document.getElementById('st-tx').textContent = st.done;
+  document.getElementById('ts-mcap').textContent = fmtMcap(st.price);
+  document.getElementById('ts-price').textContent = fmtPrice(st.price);
+  document.getElementById('ts-vol').textContent = '$' + Math.round(st.vol).toLocaleString('en-US');
+  document.getElementById('ts-buys').textContent = st.buys;
+  document.getElementById('ts-sells').textContent = st.sells;
+  let holders = 0;
+  for (const w of S.wallets) if (w.id !== 'pool' && st.b[w.id] > 0.05) holders++;
+  document.getElementById('ts-holders').textContent = holders;
+  const chg = (st.price / S.price0 - 1) * 100;
+  const chgEl = document.getElementById('ts-chg');
+  chgEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(0) + '%';
+  chgEl.className = chg >= 0 ? 'up' : 'down';
+
+  requestAnimationFrame(frame);
+}
+
+load(document.getElementById('ca-input').value);
+resize();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1028 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>rewind — every token has a story</title>
+<meta name="description" content="Paste a contract address. Rewind replays every buy, sell and transfer as a living bubble map.">
+<style>
+  :root {
+    --void: #05070F;
+    --panel: #0C1120;
+    --line: #1A2338;
+    --ink: #EAEEF6;
+    --dim: #5E6B85;
+    --buy: #39D4C0;
+    --sell: #FF6B5E;
+    --pool: #8B7CF6;
+    --seed: #F5B95A;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--void);
+    color: var(--ink);
+    font-family: var(--mono);
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--pool); color: var(--void); }
+  a { color: inherit; text-decoration: none; }
+  button, input { font-family: var(--mono); }
+
+  /* ================= film grain ================= */
+  #grain {
+    position: fixed; inset: -50%;
+    width: 200%; height: 200%;
+    pointer-events: none;
+    opacity: 0.05;
+    z-index: 60;
+  }
+
+  /* ================= scroll timeline (signature) ================= */
+  #scrub {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: 26px;
+    z-index: 50;
+    background: linear-gradient(to bottom, rgba(5,7,15,0.9), rgba(5,7,15,0));
+    pointer-events: none;
+  }
+  #scrub .track { position: absolute; left: 0; right: 0; top: 11px; height: 2px; background: var(--line); }
+  #scrub .fill { position: absolute; left: 0; top: 11px; height: 2px; width: 0%; background: linear-gradient(90deg, var(--buy), var(--pool)); }
+  #scrub .tick { position: absolute; top: 7px; width: 2px; height: 10px; border-radius: 1px; opacity: 0.9; }
+  #scrub .head { position: absolute; top: 4px; width: 2px; height: 16px; background: var(--ink); box-shadow: 0 0 6px rgba(234,238,246,0.7); }
+  #scrub .tc {
+    position: absolute; right: 14px; top: 6px;
+    font-size: 10px; color: var(--dim); letter-spacing: 0.12em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ================= nav ================= */
+  nav {
+    position: fixed; top: 26px; left: 0; right: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 26px;
+    z-index: 40;
+    mix-blend-mode: screen;
+  }
+  nav .logo { font-size: 13px; font-weight: 700; letter-spacing: 0.34em; }
+  nav .logo em { font-style: normal; color: var(--pool); }
+  nav .links { display: flex; gap: 22px; font-size: 11px; color: var(--dim); letter-spacing: 0.1em; }
+  nav .links a { transition: color 0.15s; }
+  nav .links a:hover, nav .links a:focus-visible { color: var(--ink); }
+  nav .links a:focus-visible { outline: 1px solid var(--buy); outline-offset: 4px; }
+
+  /* ================= hero ================= */
+  #hero {
+    position: relative;
+    height: 100svh;
+    min-height: 600px;
+    display: flex;
+    align-items: flex-end;
+  }
+  #hero-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  /* viewfinder brackets */
+  .vf { position: absolute; width: 26px; height: 26px; border: 1px solid var(--dim); opacity: 0.55; z-index: 5; }
+  .vf.tl { top: 46px; left: 20px; border-right: 0; border-bottom: 0; }
+  .vf.tr { top: 46px; right: 20px; border-left: 0; border-bottom: 0; }
+  .vf.bl { bottom: 20px; left: 20px; border-right: 0; border-top: 0; }
+  .vf.br { bottom: 20px; right: 20px; border-left: 0; border-top: 0; }
+
+  #hud {
+    position: absolute; top: 58px; left: 34px;
+    font-size: 10px; color: var(--dim);
+    letter-spacing: 0.16em;
+    display: flex; align-items: center; gap: 10px;
+    z-index: 5;
+  }
+  #hud .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--sell); animation: blink 1.3s steps(2, start) infinite; }
+  @keyframes blink { to { visibility: hidden; } }
+  #hud b { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; letter-spacing: 0.08em; }
+
+  #hero-inner {
+    position: relative;
+    z-index: 10;
+    width: 100%;
+    padding: 0 26px 8vh;
+    max-width: 1180px;
+    margin: 0 auto;
+  }
+  .eyebrow {
+    font-size: 11px; color: var(--dim);
+    letter-spacing: 0.28em;
+    margin-bottom: 22px;
+  }
+  h1 {
+    font-size: clamp(38px, 7.2vw, 92px);
+    line-height: 1.02;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    max-width: 15ch;
+  }
+  h1 .w-buy { color: var(--buy); }
+  h1 .w-sell { color: var(--sell); }
+  h1 .cursor {
+    display: inline-block; width: 0.55em; height: 0.9em;
+    background: var(--pool);
+    vertical-align: -0.08em;
+    margin-left: 6px;
+    animation: blink 1.1s steps(2, start) infinite;
+  }
+  .sub {
+    margin-top: 22px;
+    font-size: clamp(13px, 1.4vw, 15px);
+    color: var(--dim);
+    line-height: 1.7;
+    max-width: 52ch;
+  }
+  .sub b { color: var(--ink); font-weight: 500; }
+
+  #ca-form {
+    margin-top: 34px;
+    display: flex;
+    gap: 10px;
+    max-width: 620px;
+  }
+  #ca-form input {
+    flex: 1;
+    min-width: 0;
+    background: rgba(12,17,32,0.75);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    color: var(--ink);
+    font-size: 13px;
+    padding: 15px 16px;
+    letter-spacing: 0.02em;
+    backdrop-filter: blur(6px);
+    transition: border-color 0.15s;
+  }
+  #ca-form input::placeholder { color: var(--dim); }
+  #ca-form input:focus { outline: none; border-color: var(--pool); }
+  #ca-form button {
+    background: var(--ink);
+    color: var(--void);
+    border: 0;
+    border-radius: 4px;
+    padding: 0 26px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  #ca-form button:hover { background: var(--buy); }
+  #ca-form button:focus-visible { outline: 2px solid var(--buy); outline-offset: 3px; }
+  #ca-hint {
+    margin-top: 12px;
+    font-size: 10px; color: var(--dim);
+    letter-spacing: 0.1em;
+    min-height: 14px;
+  }
+  #ca-hint em { font-style: normal; color: var(--pool); }
+
+  #scroll-cue {
+    position: absolute; bottom: 26px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px; color: var(--dim);
+    letter-spacing: 0.3em;
+    z-index: 5;
+    animation: cue 2.4s ease-in-out infinite;
+  }
+  @keyframes cue { 0%,100% { transform: translate(-50%, 0); opacity: 0.5; } 50% { transform: translate(-50%, 6px); opacity: 1; } }
+
+  /* ================= ticker ================= */
+  #ticker {
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    overflow: hidden;
+    padding: 13px 0;
+    background: var(--panel);
+    white-space: nowrap;
+  }
+  #ticker .lane { display: inline-block; animation: scrollx 55s linear infinite; }
+  @keyframes scrollx { to { transform: translateX(-50%); } }
+  #ticker span.ev { font-size: 11px; color: var(--dim); letter-spacing: 0.06em; margin-right: 56px; }
+  #ticker .b { color: var(--buy); font-weight: 700; }
+  #ticker .s { color: var(--sell); font-weight: 700; }
+  #ticker .x { color: var(--seed); font-weight: 700; }
+
+  /* ================= sections ================= */
+  section { padding: 120px 26px; max-width: 1180px; margin: 0 auto; }
+  .sec-label {
+    font-size: 11px; color: var(--dim);
+    letter-spacing: 0.28em;
+    margin-bottom: 16px;
+  }
+  .sec-label i { font-style: normal; color: var(--pool); margin-right: 10px; }
+  h2 {
+    font-size: clamp(26px, 3.6vw, 44px);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.1;
+    max-width: 22ch;
+  }
+
+  .reveal { opacity: 0; transform: translateY(26px); transition: opacity 0.7s ease, transform 0.7s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+
+  /* --- how to read the film --- */
+  #read .grid {
+    margin-top: 56px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 22px;
+  }
+  .beat {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel);
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .beat:hover { border-color: var(--dim); }
+  .beat canvas { display: block; width: 100%; height: 190px; }
+  .beat .txt { padding: 18px 20px 22px; border-top: 1px solid var(--line); }
+  .beat .k { font-size: 11px; letter-spacing: 0.2em; font-weight: 700; }
+  .beat .k.buy { color: var(--buy); }
+  .beat .k.sell { color: var(--sell); }
+  .beat .k.seed { color: var(--seed); }
+  .beat p { margin-top: 8px; font-size: 12px; color: var(--dim); line-height: 1.65; }
+
+  /* --- export --- */
+  #export .wrap {
+    margin-top: 56px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 70px;
+    align-items: center;
+  }
+  #export .copy p { margin-top: 20px; font-size: 13px; color: var(--dim); line-height: 1.8; max-width: 46ch; }
+  #export .copy p b { color: var(--ink); font-weight: 500; }
+  .fmt-chips { margin-top: 28px; display: flex; gap: 8px; }
+  .fmt-chips span {
+    font-size: 10px; letter-spacing: 0.14em; color: var(--dim);
+    border: 1px solid var(--line);
+    padding: 7px 12px;
+    border-radius: 3px;
+  }
+  #phone {
+    width: 250px; height: 520px;
+    border: 1px solid var(--line);
+    border-radius: 26px;
+    background: var(--panel);
+    padding: 10px;
+    position: relative;
+  }
+  #phone::before {
+    content: '';
+    position: absolute; top: 16px; left: 50%;
+    transform: translateX(-50%);
+    width: 60px; height: 5px; border-radius: 3px;
+    background: var(--line);
+  }
+  #phone canvas {
+    width: 100%; height: 100%;
+    border-radius: 18px;
+    display: block;
+    background: var(--void);
+  }
+
+  /* --- windows --- */
+  #windows { text-align: center; }
+  #windows h2 { margin: 0 auto; }
+  .win-chips {
+    margin-top: 40px;
+    display: flex; justify-content: center; gap: 10px; flex-wrap: wrap;
+  }
+  .win-chips span {
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    color: var(--dim);
+    border: 1px solid var(--line);
+    padding: 12px 22px;
+    border-radius: 4px;
+    transition: color 0.15s, border-color 0.15s;
+    cursor: default;
+  }
+  .win-chips span:hover { color: var(--ink); border-color: var(--dim); }
+  .win-chips span.hot { color: var(--buy); border-color: var(--buy); }
+  #windows .note { margin-top: 26px; font-size: 11px; color: var(--dim); letter-spacing: 0.08em; }
+
+  /* --- final cta --- */
+  #final { text-align: center; padding-bottom: 140px; }
+  #final h2 { max-width: none; }
+  #final h2 .w-pool { color: var(--pool); }
+  #final .go {
+    display: inline-block;
+    margin-top: 38px;
+    background: var(--ink);
+    color: var(--void);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    padding: 17px 40px;
+    border-radius: 4px;
+    transition: background 0.15s, transform 0.15s;
+  }
+  #final .go:hover { background: var(--buy); transform: translateY(-2px); }
+  #final .go:focus-visible { outline: 2px solid var(--buy); outline-offset: 3px; }
+
+  /* ================= footer ================= */
+  footer {
+    border-top: 1px solid var(--line);
+    padding: 26px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+    color: var(--dim);
+    letter-spacing: 0.14em;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  footer .l a { margin-left: 22px; transition: color 0.15s; }
+  footer .l a:hover { color: var(--ink); }
+
+  /* ================= responsive ================= */
+  @media (max-width: 900px) {
+    #read .grid { grid-template-columns: 1fr; }
+    #export .wrap { grid-template-columns: 1fr; gap: 48px; }
+    #phone { margin: 0 auto; }
+  }
+  @media (max-width: 600px) {
+    nav .links { gap: 14px; }
+    section { padding: 84px 20px; }
+    #ca-form { flex-direction: column; }
+    #ca-form button { padding: 15px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    #hud .dot, h1 .cursor, #scroll-cue { animation: none; }
+    #ticker .lane { animation: none; }
+    .reveal { opacity: 1; transform: none; transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<canvas id="grain" aria-hidden="true"></canvas>
+
+<div id="scrub" aria-hidden="true">
+  <div class="track"></div>
+  <div class="fill" id="scrub-fill"></div>
+  <div class="head" id="scrub-head" style="left:0%"></div>
+  <div class="tc" id="scrub-tc">T+00:00:00</div>
+</div>
+
+<nav>
+  <a class="logo" href="#hero">RE<em>WIND</em></a>
+  <div class="links">
+    <a href="#read">how it reads</a>
+    <a href="#export">export</a>
+    <a href="#" aria-label="Twitter / X">x.com</a>
+    <a href="#final">app</a>
+  </div>
+</nav>
+
+<!-- ================= HERO ================= -->
+<header id="hero">
+  <canvas id="hero-canvas" aria-hidden="true"></canvas>
+  <div class="vf tl" aria-hidden="true"></div>
+  <div class="vf tr" aria-hidden="true"></div>
+  <div class="vf bl" aria-hidden="true"></div>
+  <div class="vf br" aria-hidden="true"></div>
+
+  <div id="hud">
+    <span class="dot"></span>
+    <span>REPLAY</span>
+    <b id="hud-tc">T+00:00:00</b>
+    <span id="hud-sym">$—</span>
+  </div>
+
+  <div id="hero-inner">
+    <p class="eyebrow">on-chain replay · solana</p>
+    <h1>every token has a story.<br>watch the <span class="w-buy">buys</span>, the <span class="w-sell">dumps</span>,<br>the whole film.<span class="cursor" aria-hidden="true"></span></h1>
+    <p class="sub">paste a contract address. <b>rewind</b> reconstructs the last hours of a token — every buy, sell and wallet-to-wallet transfer — and plays it back as a living bubble map. bundles have nowhere to hide.</p>
+    <form id="ca-form" autocomplete="off">
+      <input id="ca-input" spellcheck="false" placeholder="paste a contract address…" aria-label="Contract address">
+      <button type="submit">REPLAY</button>
+    </form>
+    <p id="ca-hint">try it — any address reseeds the film behind this page. <em>demo data</em></p>
+  </div>
+
+  <span id="scroll-cue" aria-hidden="true">SCROLL</span>
+</header>
+
+<!-- ================= TICKER ================= -->
+<div id="ticker" aria-hidden="true"><div class="lane" id="ticker-lane"></div></div>
+
+<!-- ================= HOW TO READ ================= -->
+<section id="read">
+  <p class="sec-label reveal"><i>■</i>HOW TO READ THE FILM</p>
+  <h2 class="reveal">three moves. that's the whole language.</h2>
+  <div class="grid">
+    <div class="beat reveal">
+      <canvas data-vig="buy" height="190"></canvas>
+      <div class="txt">
+        <p class="k buy">▲ BUY</p>
+        <p>tokens flow out of the pool. the wallet's bubble grows. green means someone believes.</p>
+      </div>
+    </div>
+    <div class="beat reveal">
+      <canvas data-vig="sell" height="190"></canvas>
+      <div class="txt">
+        <p class="k sell">▼ SELL</p>
+        <p>the flow reverses. the bag drains back into the pool and the bubble deflates on screen.</p>
+      </div>
+    </div>
+    <div class="beat reveal">
+      <canvas data-vig="bundle" height="190"></canvas>
+      <div class="txt">
+        <p class="k seed">⇄ BUNDLE</p>
+        <p>deployer seeds fresh wallets at minute one. hours later they dump in sync. you literally watch it happen.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= EXPORT ================= -->
+<section id="export">
+  <div class="wrap">
+    <div class="copy">
+      <p class="sec-label reveal"><i>■</i>EXPORT</p>
+      <h2 class="reveal">export the film.<br>post the receipts.</h2>
+      <p class="reveal">one click renders the replay to video — timecode, captions and stats baked in. <b>16:9 for the thread, 9:16 for everywhere else.</b> when a wallet gets caught, the clip is the proof.</p>
+      <div class="fmt-chips reveal">
+        <span>WEBM</span><span>16:9 · 1280×720</span><span>9:16 · 720×1280</span><span>60 FPS</span>
+      </div>
+    </div>
+    <div id="phone" class="reveal">
+      <canvas id="phone-canvas" aria-hidden="true"></canvas>
+    </div>
+  </div>
+</section>
+
+<!-- ================= WINDOWS ================= -->
+<section id="windows">
+  <p class="sec-label reveal" style="justify-content:center"><i>■</i>TIME WINDOW</p>
+  <h2 class="reveal">any token. any window.</h2>
+  <div class="win-chips reveal">
+    <span>30M</span><span class="hot">1H</span><span>2H</span><span>6H</span><span>24H</span>
+  </div>
+  <p class="note reveal">from the launch candle to the slow bleed — pick the cut you want to watch.</p>
+</section>
+
+<!-- ================= FINAL CTA ================= -->
+<section id="final">
+  <h2 class="reveal">the chain never forgets.<br>now it has a <span class="w-pool">replay button</span>.</h2>
+  <a class="go reveal" href="#hero">OPEN THE APP</a>
+</section>
+
+<footer>
+  <span>REWIND © 2026 · built on solana</span>
+  <span class="l">
+    <a href="#" aria-label="Twitter / X">x.com</a>
+    <a href="#">docs</a>
+    <a href="#final">app</a>
+  </span>
+</footer>
+
+<script>
+(() => {
+'use strict';
+
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* =========================================================
+   shared helpers
+   ========================================================= */
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const COL = { buy: css('--buy'), sell: css('--sell'), pool: css('--pool'), seed: css('--seed'),
+              ink: css('--ink'), dim: css('--dim'), line: css('--line') };
+const MONO = css('--mono');
+const ease = u => u < 0.5 ? 2*u*u : 1 - Math.pow(-2*u + 2, 2) / 2;
+
+function hashStr(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function mulberry32(a) {
+  return () => {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const fakeAddr = rng => {
+  let a = '', z = '';
+  for (let i = 0; i < 4; i++) { a += B58[(rng()*B58.length)|0]; z += B58[(rng()*B58.length)|0]; }
+  return a + '…' + z;
+};
+const symbolFrom = (ca, rng) => {
+  const L = (ca.replace(/[^A-Za-z]/g, '') || 'REWIND').toUpperCase();
+  let s = '';
+  const n = 3 + (rng()*2|0);
+  for (let i = 0; i < n; i++) s += L[(rng()*L.length)|0];
+  return s;
+};
+
+function fitCanvas(cv) {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const r = cv.getBoundingClientRect();
+  cv.width = r.width * dpr; cv.height = r.height * dpr;
+  const c = cv.getContext('2d');
+  c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx: c, W: r.width, H: r.height };
+}
+
+/* particle flow between two points */
+function flow(ctx, a, z, u, color, usd, dashed) {
+  ctx.save();
+  ctx.globalAlpha = 0.25;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.setLineDash(dashed ? [2, 4] : [4, 6]);
+  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(z.x, z.y); ctx.stroke();
+  ctx.restore();
+
+  const n = Math.min(3 + Math.round((usd || 1000) / 800), 12);
+  ctx.save();
+  ctx.shadowColor = color; ctx.shadowBlur = 10;
+  ctx.fillStyle = color;
+  for (let i = 0; i < n; i++) {
+    let p = u - i * 0.05;
+    if (p < 0 || p > 1) continue;
+    p = ease(p);
+    ctx.beginPath();
+    ctx.arc(a.x + (z.x-a.x)*p, a.y + (z.y-a.y)*p, Math.max(3.2 - i*0.2, 1.1), 0, Math.PI*2);
+    ctx.fill();
+  }
+  const hp = ease(Math.min(Math.max(u, 0), 1));
+  const hx = a.x + (z.x-a.x)*hp, hy = a.y + (z.y-a.y)*hp;
+  const ang = Math.atan2(z.y-a.y, z.x-a.x);
+  ctx.beginPath();
+  ctx.moveTo(hx + Math.cos(ang)*8, hy + Math.sin(ang)*8);
+  ctx.lineTo(hx + Math.cos(ang+2.5)*6, hy + Math.sin(ang+2.5)*6);
+  ctx.lineTo(hx + Math.cos(ang-2.5)*6, hy + Math.sin(ang-2.5)*6);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function bubble(ctx, x, y, r, color, fillA, label, value, pulse, alpha) {
+  ctx.save();
+  ctx.globalAlpha = alpha ?? 1;
+  if (pulse > 0) { ctx.shadowColor = color; ctx.shadowBlur = 20 * pulse; }
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2);
+  ctx.fillStyle = fillA; ctx.fill();
+  ctx.lineWidth = 1.3 + (pulse || 0);
+  ctx.strokeStyle = color; ctx.stroke();
+  ctx.shadowBlur = 0;
+  if (label) {
+    ctx.textAlign = 'center';
+    ctx.font = '600 9px ' + MONO;
+    ctx.fillStyle = COL.dim;
+    ctx.fillText(label, x, y - r - 7);
+  }
+  if (value) {
+    ctx.textAlign = 'center';
+    ctx.font = '700 10px ' + MONO;
+    ctx.fillStyle = COL.ink;
+    ctx.fillText(value, x, y + 3.5);
+  }
+  ctx.restore();
+}
+
+/* =========================================================
+   scenario generator (seeded by CA)
+   ========================================================= */
+const WINDOW = 7200, ANIM = 120, SUPPLY = 1000;
+
+function generateScenario(ca) {
+  const rng = mulberry32(hashStr(ca || 'rewind'));
+  const sym = symbolFrom(ca || 'rewind', rng);
+  const wallets = [
+    { id: 'pool', label: 'raydium lp', type: 'pool' },
+    { id: 'dep', label: 'deployer', type: 'dep' },
+  ];
+  const holdings = { pool: SUPPLY * 0.78, dep: SUPPLY * 0.22 };
+  const fresh = [], buyers = [];
+  const nF = 2 + (rng()*2|0), nB = 4 + (rng()*3|0);
+  for (let i = 0; i < nF; i++) { const id = 'f'+i; fresh.push(id); wallets.push({id, label: fakeAddr(rng), type:'fresh'}); holdings[id]=0; }
+  for (let i = 0; i < nB; i++) { const id = 'w'+i; buyers.push(id); wallets.push({id, label: fakeAddr(rng), type:'wallet'}); holdings[id]=0; }
+  wallets.push({ id: 'whale', label: fakeAddr(rng), type: 'whale' }); holdings.whale = 0;
+
+  const liq = 15000 + rng()*20000;
+  let priceM = liq / (SUPPLY*0.78) * (0.8 + rng()*0.6);
+  const price0 = priceM;
+  const evs = [];
+  const impact = (usd, d) => { priceM *= Math.max(0.4, 1 + d * (usd/liq) * (0.35 + rng()*0.3)); };
+  const buy = (t, who, usd) => {
+    const tk = Math.min(usd/priceM, holdings.pool*0.4);
+    impact(usd, 1); holdings.pool -= tk; holdings[who] += tk;
+    evs.push({ t, type:'buy', from:'pool', to:who, tokens:tk, usd, priceAfter:priceM });
+  };
+  const sell = (t, who, fr) => {
+    const tk = holdings[who]*fr;
+    if (tk <= 0.01) return;
+    const usd = tk*priceM;
+    impact(usd, -1); holdings[who] -= tk; holdings.pool += tk;
+    evs.push({ t, type:'sell', from:who, to:'pool', tokens:tk, usd, priceAfter:priceM });
+  };
+  const xfer = (t, a, b, tk) => {
+    tk = Math.min(tk, holdings[a]); holdings[a] -= tk; holdings[b] += tk;
+    evs.push({ t, type:'xfer', from:a, to:b, tokens:tk, usd:tk*priceM, priceAfter:priceM });
+  };
+
+  let t = 90 + rng()*120;
+  for (const f of fresh) { xfer(Math.round(t), 'dep', f, SUPPLY*(0.03+rng()*0.04)); t += 60 + rng()*120; }
+  const bts = [];
+  for (let i = 0; i < nB*2; i++) bts.push(400 + rng()*3800);
+  bts.sort((a,b)=>a-b).forEach((bt,i)=> buy(Math.round(bt), buyers[i%nB], 150 + rng()*2200));
+  buy(Math.round(2200 + rng()*1200), 'whale', 4000 + rng()*5000);
+  sell(Math.round(3000 + rng()*1200), buyers[0], 0.4 + rng()*0.3);
+  let dt = 5100 + rng()*400;
+  for (const f of fresh) { sell(Math.round(dt), f, 0.85 + rng()*0.15); dt += 40 + rng()*90; }
+  sell(Math.round(dt + 200 + rng()*300), buyers[2%nB], 0.8);
+  if (rng() > 0.3) sell(Math.round(dt + 500 + rng()*400), 'whale', 0.5 + rng()*0.4);
+  sell(Math.round(Math.min(dt + 800 + rng()*500, WINDOW-150)), buyers[3%nB], 0.9);
+  evs.sort((a,b)=>a.t-b.t);
+
+  const init = { pool: SUPPLY*0.78, dep: SUPPLY*0.22 };
+  wallets.forEach(w => { if (!(w.id in init)) init[w.id] = 0; });
+  const appear = { pool: 0, dep: 0 };
+  for (const e of evs) { if (!(e.from in appear)) appear[e.from] = e.t; if (!(e.to in appear)) appear[e.to] = e.t; }
+  wallets.forEach(w => { if (!(w.id in appear)) appear[w.id] = 0; });
+
+  return { sym, wallets, evs, init, appear, price0 };
+}
+
+function stateAt(S, T) {
+  const b = Object.assign({}, S.init);
+  let price = S.price0;
+  for (const e of S.evs) {
+    if (T <= e.t) continue;
+    const k = ease(Math.min((T - e.t)/ANIM, 1));
+    b[e.from] -= e.tokens*k; b[e.to] += e.tokens*k;
+    price = price + (e.priceAfter - price)*k;
+    if (k >= 1) price = e.priceAfter;
+  }
+  return { b, price };
+}
+
+const typeColor = t => t==='pool' ? COL.pool : (t==='dep'||t==='fresh') ? COL.seed : t==='whale' ? COL.ink : COL.dim;
+const flowColor = e => e.type==='buy' ? COL.buy : e.type==='sell' ? COL.sell : COL.seed;
+const radius = tk => Math.max(11, 9 + Math.sqrt(Math.max(tk,0))*1.9);
+
+/* =========================================================
+   HERO — ambient replay
+   ========================================================= */
+const heroCv = document.getElementById('hero-canvas');
+let hero = { S: null, ctx: null, W: 0, H: 0, pos: {}, T: 0, visible: true };
+
+function heroLayout() {
+  const f = fitCanvas(heroCv);
+  hero.ctx = f.ctx; hero.W = f.W; hero.H = f.H;
+  if (!hero.S) return;
+  // pool décalé à droite pour laisser respirer le texte à gauche
+  const cx = hero.W * (hero.W > 760 ? 0.64 : 0.5);
+  const cy = hero.H * 0.42;
+  hero.pos.pool = { x: cx, y: cy };
+  const others = hero.S.wallets.filter(w => w.id !== 'pool');
+  const R = Math.min(hero.W, hero.H) * 0.34;
+  others.forEach((w, i) => {
+    const a = (i / others.length) * Math.PI*2 - Math.PI/2;
+    hero.pos[w.id] = { x: cx + Math.cos(a)*R*1.18, y: cy + Math.sin(a)*R*0.85, ph: i*1.7 };
+  });
+}
+
+function loadHero(ca) {
+  hero.S = generateScenario(ca);
+  hero.T = 0;
+  document.getElementById('hud-sym').textContent = '$' + hero.S.sym;
+  heroLayout();
+}
+
+const HERO_SPEED = 85; // sim s / real s → ~85s de film
+let heroLast = 0;
+function heroFrame(ts) {
+  requestAnimationFrame(heroFrame);
+  if (!hero.visible || !hero.S) { heroLast = ts; return; }
+  const dt = Math.min((ts - heroLast)/1000, 0.1); heroLast = ts;
+  hero.T += dt * HERO_SPEED;
+  if (hero.T > WINDOW + 400) hero.T = 0; // boucle
+  drawHero(hero.T, ts/1000);
+  const s = Math.floor(Math.min(hero.T, WINDOW));
+  document.getElementById('hud-tc').textContent = 'T+' +
+    String(s/3600|0).padStart(2,'0') + ':' + String(s%3600/60|0).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+}
+
+function drawHero(T, wall) {
+  const { ctx, W, H, S, pos } = hero;
+  ctx.clearRect(0, 0, W, H);
+
+  // grille discrète
+  ctx.save();
+  ctx.strokeStyle = COL.line; ctx.globalAlpha = 0.3; ctx.lineWidth = 1;
+  const st = 52;
+  for (let x = (W%st)/2; x < W; x += st) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for (let y = (H%st)/2; y < H; y += st) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+  ctx.restore();
+
+  const st8 = stateAt(S, T);
+
+  // drift positions
+  const dp = {};
+  for (const w of S.wallets) {
+    const p = pos[w.id];
+    dp[w.id] = w.id === 'pool' ? { x: p.x, y: p.y }
+      : { x: p.x + Math.sin(wall*0.4 + p.ph)*7, y: p.y + Math.cos(wall*0.32 + p.ph)*6 };
+  }
+
+  for (const e of S.evs) {
+    const u = (T - e.t)/ANIM;
+    if (u < 0 || u > 1) continue;
+    flow(ctx, dp[e.from], dp[e.to], u, flowColor(e), e.usd, e.type==='xfer');
+  }
+
+  for (const w of S.wallets) {
+    const born = S.appear[w.id];
+    if (T < born) continue;
+    const fade = Math.min((T-born)/60, 1) * 0.9;
+    let pulse = 0;
+    for (const e of S.evs) {
+      if (e.from !== w.id && e.to !== w.id) continue;
+      const u = (T - e.t)/ANIM;
+      if (u >= 0 && u <= 1) pulse = Math.max(pulse, Math.sin(u*Math.PI));
+    }
+    const p = dp[w.id];
+    const r = radius(st8.b[w.id]);
+    const c = typeColor(w.type);
+    bubble(ctx, p.x, p.y, r, c,
+      w.id === 'pool' ? 'rgba(139,124,246,0.07)' : 'rgba(234,238,246,0.04)',
+      w.id === 'pool' ? w.label : (r > 16 ? w.label : null),
+      null, pulse, fade);
+  }
+}
+
+const heroIO = new IntersectionObserver(es => es.forEach(e => hero.visible = e.isIntersecting), { threshold: 0.05 });
+heroIO.observe(heroCv);
+window.addEventListener('resize', heroLayout);
+
+/* input reseeds the film */
+document.getElementById('ca-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const v = document.getElementById('ca-input').value.trim();
+  loadHero(v || String(Math.random()));
+  buildTicker();
+  document.getElementById('ca-hint').innerHTML =
+    'replaying <em>$' + hero.S.sym + '</em> — demo data · the full app streams real solana history';
+});
+
+/* =========================================================
+   TICKER
+   ========================================================= */
+function fmtTk(m) { return m >= 1 ? Math.round(m) + 'M' : Math.round(m*1000) + 'k'; }
+function buildTicker() {
+  const lane = document.getElementById('ticker-lane');
+  const parts = [];
+  for (const e of hero.S.evs) {
+    const usd = '$' + Math.round(e.usd).toLocaleString('en-US');
+    const who = hero.S.wallets.find(w => w.id === (e.type==='buy' ? e.to : e.from));
+    if (e.type === 'buy') parts.push('<span class="ev"><span class="b">▲ BUY ' + usd + '</span> · ' + who.label + ' grabs ' + fmtTk(e.tokens) + ' $' + hero.S.sym + '</span>');
+    else if (e.type === 'sell') parts.push('<span class="ev"><span class="s">▼ SELL ' + usd + '</span> · ' + (who.type==='fresh' ? 'fresh wallet ' : who.type==='whale' ? 'whale ' : '') + who.label + ' dumps the bag</span>');
+    else parts.push('<span class="ev"><span class="x">⇄ TRANSFER</span> · deployer seeds ' + fmtTk(e.tokens) + ' $' + hero.S.sym + ' to a fresh wallet</span>');
+  }
+  const half = parts.join('');
+  lane.innerHTML = half + half; // boucle fluide
+}
+
+/* =========================================================
+   VIGNETTES — mini boucles pédagogiques
+   ========================================================= */
+const vigs = [];
+function makeVig(cv) {
+  const kind = cv.dataset.vig;
+  const v = { cv, kind, ctx: null, W: 0, H: 0, visible: false };
+  const fit = () => { const f = fitCanvas(cv); v.ctx = f.ctx; v.W = f.W; v.H = f.H; };
+  fit();
+  window.addEventListener('resize', fit);
+  vigs.push(v);
+  new IntersectionObserver(es => es.forEach(e => v.visible = e.isIntersecting), { threshold: 0.1 }).observe(cv);
+}
+document.querySelectorAll('[data-vig]').forEach(makeVig);
+
+const LOOP = 4.6; // s
+function drawVig(v, tt) {
+  const { ctx, W, H, kind } = v;
+  const u = (tt % LOOP) / LOOP;
+  ctx.clearRect(0, 0, W, H);
+
+  if (kind === 'buy') {
+    const pool = { x: W*0.26, y: H*0.5 }, w = { x: W*0.74, y: H*0.5 };
+    const g = ease(Math.min(Math.max((u - 0.15)/0.5, 0), 1)); // croissance du wallet
+    const fu = (u - 0.1)/0.55;
+    if (fu > 0 && fu < 1) flow(ctx, pool, w, fu, COL.buy, 1600, false);
+    bubble(ctx, pool.x, pool.y, 34 - g*6, COL.pool, 'rgba(139,124,246,0.07)', 'pool', null, fu>0&&fu<1 ? Math.sin(Math.min(Math.max(fu,0),1)*Math.PI)*0.6 : 0, 1);
+    bubble(ctx, w.x, w.y, 13 + g*13, COL.dim, 'rgba(234,238,246,0.04)', 'Ab3d…9xKq', null, 0, 1);
+  }
+
+  if (kind === 'sell') {
+    const w = { x: W*0.74, y: H*0.5 }, pool = { x: W*0.26, y: H*0.5 };
+    const g = ease(Math.min(Math.max((u - 0.15)/0.5, 0), 1));
+    const fu = (u - 0.1)/0.55;
+    if (fu > 0 && fu < 1) flow(ctx, w, pool, fu, COL.sell, 2400, false);
+    bubble(ctx, w.x, w.y, 26 - g*13, COL.dim, 'rgba(234,238,246,0.04)', 'Fj2N…7cVe', null, 0, 1);
+    bubble(ctx, pool.x, pool.y, 28 + g*6, COL.pool, 'rgba(139,124,246,0.07)', 'pool', null, fu>0&&fu<1 ? Math.sin(Math.min(Math.max(fu,0),1)*Math.PI)*0.6 : 0, 1);
+  }
+
+  if (kind === 'bundle') {
+    const dep = { x: W*0.2, y: H*0.32 };
+    const pool = { x: W*0.28, y: H*0.74 };
+    const fr = [ { x: W*0.62, y: H*0.2 }, { x: W*0.78, y: H*0.44 }, { x: W*0.64, y: H*0.7 } ];
+    // phase 1 : seed (0 → 0.35), phase 2 : pause, phase 3 : dump synchro (0.55 → 0.9)
+    fr.forEach((f, i) => {
+      const su = (u - 0.02 - i*0.05)/0.28;
+      if (su > 0 && su < 1) flow(ctx, dep, f, su, COL.seed, 600, true);
+      const du = (u - 0.55 - i*0.03)/0.3;
+      if (du > 0 && du < 1) flow(ctx, f, pool, du, COL.sell, 1800, false);
+      const grew = ease(Math.min(Math.max((u - 0.1 - i*0.05)/0.25, 0), 1));
+      const shrunk = ease(Math.min(Math.max((u - 0.55 - i*0.03)/0.3, 0), 1));
+      bubble(ctx, f.x, f.y, 10 + grew*9 - shrunk*9, COL.seed, 'rgba(245,185,90,0.05)', i===0 ? 'fresh' : null, null, 0, 1);
+    });
+    bubble(ctx, dep.x, dep.y, 20, COL.seed, 'rgba(245,185,90,0.06)', 'deployer', null, 0, 1);
+    const poolG = ease(Math.min(Math.max((u - 0.6)/0.3, 0), 1));
+    bubble(ctx, pool.x, pool.y, 22 + poolG*5, COL.pool, 'rgba(139,124,246,0.07)', 'pool', null, 0, 1);
+  }
+}
+
+/* =========================================================
+   PHONE — export 9:16 preview
+   ========================================================= */
+const phoneCv = document.getElementById('phone-canvas');
+const phone = { S: generateScenario('export-teaser'), ctx: null, W: 0, H: 0, pos: {}, visible: false };
+function phoneLayout() {
+  const f = fitCanvas(phoneCv);
+  phone.ctx = f.ctx; phone.W = f.W; phone.H = f.H;
+  const cx = phone.W/2, cy = phone.H*0.46;
+  phone.pos.pool = { x: cx, y: cy };
+  const others = phone.S.wallets.filter(w => w.id !== 'pool');
+  const R = phone.W * 0.36;
+  others.forEach((w, i) => {
+    const a = (i/others.length)*Math.PI*2 - Math.PI/2;
+    phone.pos[w.id] = { x: cx + Math.cos(a)*R, y: cy + Math.sin(a)*R*1.35 };
+  });
+}
+phoneLayout();
+window.addEventListener('resize', phoneLayout);
+new IntersectionObserver(es => es.forEach(e => phone.visible = e.isIntersecting), { threshold: 0.1 }).observe(phoneCv);
+
+const PHONE_LOOP = 26; // le film complet en 26s
+function drawPhone(tt) {
+  const T = (tt % PHONE_LOOP) / PHONE_LOOP * WINDOW;
+  const { ctx, W, H, S, pos } = phone;
+  const st8 = stateAt(S, T);
+  ctx.clearRect(0, 0, W, H);
+
+  // stat bar bakée en haut
+  ctx.save();
+  ctx.font = '700 9px ' + MONO;
+  ctx.fillStyle = COL.pool;
+  ctx.textAlign = 'left';
+  ctx.fillText('$' + S.sym, 12, 24);
+  const chg = (st8.price/S.price0 - 1)*100;
+  ctx.fillStyle = chg >= 0 ? COL.buy : COL.sell;
+  ctx.textAlign = 'right';
+  ctx.fillText((chg>=0?'+':'') + chg.toFixed(0) + '%', W-12, 24);
+  ctx.strokeStyle = COL.line; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(10, 34); ctx.lineTo(W-10, 34); ctx.stroke();
+  ctx.restore();
+
+  for (const e of S.evs) {
+    const u = (T - e.t)/ANIM;
+    if (u < 0 || u > 1) continue;
+    flow(ctx, pos[e.from], pos[e.to], u, flowColor(e), e.usd, e.type==='xfer');
+  }
+  for (const w of S.wallets) {
+    if (T < S.appear[w.id]) continue;
+    let pulse = 0;
+    for (const e of S.evs) {
+      if (e.from !== w.id && e.to !== w.id) continue;
+      const u = (T - e.t)/ANIM;
+      if (u >= 0 && u <= 1) pulse = Math.max(pulse, Math.sin(u*Math.PI));
+    }
+    const p = pos[w.id];
+    bubble(ctx, p.x, p.y, radius(st8.b[w.id])*0.72, typeColor(w.type),
+      w.id==='pool' ? 'rgba(139,124,246,0.07)' : 'rgba(234,238,246,0.04)', null, null, pulse, 0.95);
+  }
+
+  // caption bakée
+  let cap = null, capCol = COL.dim;
+  for (const e of S.evs) if (T >= e.t && T <= e.t + 240) {
+    cap = (e.type==='buy' ? '▲ BUY' : e.type==='sell' ? '▼ SELL' : '⇄ TRANSFER') + ' $' + Math.round(e.usd).toLocaleString('en-US');
+    capCol = flowColor(e);
+  }
+  ctx.save();
+  if (cap) {
+    ctx.font = '700 10px ' + MONO;
+    ctx.fillStyle = capCol;
+    ctx.textAlign = 'center';
+    ctx.fillText(cap, W/2, H - 44);
+  }
+  // watermark + progress
+  ctx.font = '600 8px ' + MONO;
+  ctx.fillStyle = COL.dim;
+  ctx.textAlign = 'right';
+  ctx.fillText('rewind · $' + S.sym, W - 12, H - 14);
+  ctx.strokeStyle = COL.line;
+  ctx.beginPath(); ctx.moveTo(12, H - 26); ctx.lineTo(W - 12, H - 26); ctx.stroke();
+  ctx.strokeStyle = COL.pool;
+  ctx.beginPath(); ctx.moveTo(12, H - 26); ctx.lineTo(12 + (W - 24)*(T/WINDOW), H - 26); ctx.stroke();
+  ctx.restore();
+}
+
+/* =========================================================
+   boucle globale secondaire (vignettes + phone)
+   ========================================================= */
+function miniFrame(ts) {
+  requestAnimationFrame(miniFrame);
+  const tt = ts/1000;
+  for (const v of vigs) if (v.visible) drawVig(v, tt);
+  if (phone.visible) drawPhone(tt);
+}
+
+/* =========================================================
+   scroll timeline + reveals
+   ========================================================= */
+const scrubFill = document.getElementById('scrub-fill');
+const scrubHead = document.getElementById('scrub-head');
+const scrubTc = document.getElementById('scrub-tc');
+const scrubEl = document.getElementById('scrub');
+
+function buildScrubTicks() {
+  // ticks = événements du scénario hero, mappés sur la longueur de la page
+  scrubEl.querySelectorAll('.tick').forEach(el => el.remove());
+  for (const e of hero.S.evs) {
+    const el = document.createElement('div');
+    el.className = 'tick';
+    el.style.left = (e.t/WINDOW*100) + '%';
+    el.style.background = flowColor(e);
+    scrubEl.appendChild(el);
+  }
+}
+function onScroll() {
+  const max = document.documentElement.scrollHeight - window.innerHeight;
+  const p = max > 0 ? Math.min(window.scrollY/max, 1) : 0;
+  scrubFill.style.width = (p*100) + '%';
+  scrubHead.style.left = (p*100) + '%';
+  const s = Math.floor(p*WINDOW);
+  scrubTc.textContent = 'T+' + String(s/3600|0).padStart(2,'0') + ':' + String(s%3600/60|0).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+}
+window.addEventListener('scroll', onScroll, { passive: true });
+
+const revIO = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) e.target.classList.add('in'); }), { threshold: 0.12 });
+document.querySelectorAll('.reveal').forEach(el => revIO.observe(el));
+
+/* =========================================================
+   grain
+   ========================================================= */
+(function grain() {
+  const g = document.getElementById('grain');
+  const c = g.getContext('2d');
+  g.width = 240; g.height = 240;
+  const img = c.createImageData(240, 240);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = Math.random()*255 | 0;
+    img.data[i] = img.data[i+1] = img.data[i+2] = v;
+    img.data[i+3] = 26;
+  }
+  c.putImageData(img, 0, 0);
+})();
+
+/* =========================================================
+   boot
+   ========================================================= */
+loadHero('rewind-genesis');
+buildTicker();
+buildScrubTicks();
+onScroll();
+
+if (REDUCED) {
+  // frame statique à mi-film, pas de boucles
+  hero.T = WINDOW*0.55;
+  drawHero(hero.T, 0);
+  for (const v of vigs) { v.visible = false; drawVig(v, LOOP*0.5); }
+  drawPhone(PHONE_LOOP*0.4);
+} else {
+  requestAnimationFrame(ts => { heroLast = ts; heroFrame(ts); });
+  requestAnimationFrame(miniFrame);
+}
+})();
+</script>
+</body>
+</html>

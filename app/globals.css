@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: #0b0d0b;
+  color: #e8f0e4;
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* phosphor selection — tape DA */
+::selection {
+  background: #4ce07e;
+  color: #0b0d0b;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #212821 transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #212821;
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* OSD phosphor glow — apply to tape chrome labels */
+.osd {
+  letter-spacing: 0.18em;
+  text-shadow: 0 0 6px rgba(232, 240, 228, 0.22);
+}
+
+/* scanlines + vignette — media surfaces only (canvas viewport) */
+.scan::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.35) 0 1px, transparent 1px 3px);
+  opacity: 0.1;
+  pointer-events: none;
+  z-index: 3;
+}
+.scan::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 58%, rgba(0, 0, 0, 0.45) 100%);
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* rec dot — blinking record indicator */
+@keyframes rec-blink {
+  to {
+    visibility: hidden;
+  }
+}
+.rec-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff5a3c;
+  box-shadow: 0 0 8px #ff5a3c;
+  animation: rec-blink 1.4s steps(2, start) infinite;
+}
+
+/* bubble loading spinner — inflates / deflates (phosphor cyan pool) */
+@keyframes bubble-breathe {
+  0%,
+  100% {
+    transform: scale(0.55);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.bubble-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  border: 1px solid #56c8e8;
+  background: radial-gradient(circle at 35% 35%, rgba(86, 200, 232, 0.45), rgba(86, 200, 232, 0.08));
+  animation: bubble-breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.caption-enter {
+  animation: fade-up 0.25s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bubble-spinner,
+  .caption-enter,
+  .rec-dot {
+    animation: none;
+  }
+}
